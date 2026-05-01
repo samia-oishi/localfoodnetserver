@@ -21,30 +21,36 @@ const client = new MongoClient(uri, {
 
 let reviewsCollection;
 let favoritesCollection;
-let dbReady = false;
+let connectionPromise = null;
 
-async function connectDB() {
+async function ensureConnected() {
+  if (!connectionPromise) {
+    connectionPromise = (async () => {
+      await client.connect();
+      const db = client.db("localfoodnetDb");
+      reviewsCollection = db.collection("reviews");
+      favoritesCollection = db.collection("favorites");
+      await client.db("admin").command({ ping: 1 });
+      console.log("Successfully connected to MongoDB!");
+    })().catch((err) => {
+      // reset so the next request can retry instead of being permanently broken
+      connectionPromise = null;
+      throw err;
+    });
+  }
+  return connectionPromise;
+}
+
+const requireDB = async (req, res, next) => {
   try {
-    await client.connect();
-    const db = client.db("localfoodnetDb");
-    reviewsCollection = db.collection("reviews");
-    favoritesCollection = db.collection("favorites");
-    await client.db("admin").command({ ping: 1 });
-    dbReady = true;
-    console.log("Successfully connected to MongoDB!");
+    await ensureConnected();
+    next();
   } catch (err) {
     console.error("MongoDB connection failed:", err.message);
-  }
-}
-connectDB();
-
-const requireDB = (req, res, next) => {
-  if (!dbReady) {
-    return res
+    res
       .status(503)
-      .json({ error: "Database not connected. Check server logs." });
+      .json({ error: "Database not connected: " + err.message });
   }
-  next();
 };
 
 // ============ REVIEWS ENDPOINTS ============
@@ -242,12 +248,21 @@ app.delete("/favorites/:id", requireDB, async (req, res) => {
   }
 });
 
-app.get("/", (req, res) => {
-  res.send(
-    `Local Food Lovers Network server is running. DB: ${dbReady ? "connected" : "NOT connected"}`
-  );
+app.get("/", async (req, res) => {
+  let dbStatus = "not yet connected";
+  try {
+    await ensureConnected();
+    dbStatus = "connected";
+  } catch (err) {
+    dbStatus = "FAILED — " + err.message;
+  }
+  res.send(`Local Food Lovers Network server is running. DB: ${dbStatus}`);
 });
 
-app.listen(port, () => {
-  console.log(`Local Food Lovers Network server listening on port ${port}`);
-});
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Local Food Lovers Network server listening on port ${port}`);
+  });
+}
+
+module.exports = app;
