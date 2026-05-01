@@ -60,10 +60,21 @@ app.post("/reviews", requireDB, async (req, res) => {
 
 app.get("/reviews", requireDB, async (req, res) => {
   try {
-    const result = await reviewsCollection
-      .find()
-      .sort({ date: -1 })
-      .toArray();
+    const { search, category, rating, sort } = req.query;
+    const filter = {};
+    if (search) filter.foodName = { $regex: search, $options: "i" };
+    if (category) filter.category = category;
+    if (rating) filter.rating = Number(rating);
+
+    const sortMap = {
+      date_desc: { date: -1 },
+      date_asc: { date: 1 },
+      rating_desc: { rating: -1 },
+      rating_asc: { rating: 1 },
+    };
+    const sortBy = sortMap[sort] || { date: -1 };
+
+    const result = await reviewsCollection.find(filter).sort(sortBy).toArray();
     res.send(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -91,6 +102,29 @@ app.get("/reviews/search", requireDB, async (req, res) => {
       .sort({ date: -1 })
       .toArray();
     res.send(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/reviews/counts", requireDB, async (req, res) => {
+  try {
+    const total = await reviewsCollection.countDocuments();
+    const catAgg = await reviewsCollection
+      .aggregate([{ $group: { _id: "$category", count: { $sum: 1 } } }])
+      .toArray();
+    const ratAgg = await reviewsCollection
+      .aggregate([{ $group: { _id: "$rating", count: { $sum: 1 } } }])
+      .toArray();
+    const byCategory = {};
+    catAgg.forEach((x) => {
+      if (x._id) byCategory[x._id] = x.count;
+    });
+    const byRating = {};
+    ratAgg.forEach((x) => {
+      if (x._id != null) byRating[x._id] = x.count;
+    });
+    res.send({ total, byCategory, byRating });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -132,6 +166,7 @@ app.put("/reviews/:id", requireDB, async (req, res) => {
           location: u.location,
           rating: u.rating,
           reviewText: u.reviewText,
+          category: u.category,
         },
       }
     );
