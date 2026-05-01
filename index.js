@@ -217,6 +217,20 @@ app.get("/favorites/:email", requireDB, async (req, res) => {
   }
 });
 
+app.delete("/users/:email", requireDB, async (req, res) => {
+  try {
+    const email = req.params.email;
+    const r1 = await reviewsCollection.deleteMany({ userEmail: email });
+    const r2 = await favoritesCollection.deleteMany({ userEmail: email });
+    res.send({
+      reviewsDeleted: r1.deletedCount,
+      favoritesDeleted: r2.deletedCount,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete("/favorites/:id", requireDB, async (req, res) => {
   try {
     const result = await favoritesCollection.deleteOne({
